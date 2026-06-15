@@ -15,7 +15,8 @@ public class LabelPrinterPlugin: CAPPlugin {
 
     @objc func discoverDevices(_ call: CAPPluginCall) {
         let prefixes = call.getArray("namePrefixes", String.self) ?? []
-        call.resolve(["devices": manager.discoverDevices(namePrefixes: prefixes)])
+        let timeoutMs = call.getDouble("timeout") ?? 2000
+        call.resolve(["devices": manager.discoverDevices(namePrefixes: prefixes, timeoutMs: timeoutMs)])
     }
 
     @objc func connect(_ call: CAPPluginCall) {
@@ -24,8 +25,12 @@ public class LabelPrinterPlugin: CAPPlugin {
             return
         }
 
-        manager.connect(deviceId: deviceId)
-        call.resolve()
+        do {
+            try manager.connect(deviceId: deviceId)
+            call.resolve()
+        } catch {
+            call.reject(error.localizedDescription)
+        }
     }
 
     @objc func disconnect(_ call: CAPPluginCall) {

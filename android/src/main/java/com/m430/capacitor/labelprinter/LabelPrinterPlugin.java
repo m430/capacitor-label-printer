@@ -11,7 +11,12 @@ import java.util.List;
 
 @CapacitorPlugin(name = "LabelPrinter")
 public class LabelPrinterPlugin extends Plugin {
-    private final AndroidPrinterManager manager = new AndroidPrinterManager();
+    private AndroidPrinterManager manager;
+
+    @Override
+    public void load() {
+        manager = new AndroidPrinterManager(new VendorAndroidDeviceCatalog(getContext()), new AndroidStatusMapper());
+    }
 
     @PluginMethod
     public void isSupported(PluginCall call) {
@@ -40,15 +45,23 @@ public class LabelPrinterPlugin extends Plugin {
             }
         }
 
-        JSObject result = new JSObject();
-        result.put("devices", manager.getBondedDevices(prefixes));
-        call.resolve(result);
+        try {
+            JSObject result = new JSObject();
+            result.put("devices", manager.getBondedDevices(prefixes));
+            call.resolve(result);
+        } catch (Exception exception) {
+            call.reject(exception.getMessage(), exception);
+        }
     }
 
     @PluginMethod
     public void connect(PluginCall call) {
-        manager.connect(call.getString("deviceId"));
-        call.resolve();
+        try {
+            manager.connect(call.getString("deviceId"));
+            call.resolve();
+        } catch (Exception exception) {
+            call.reject(exception.getMessage(), exception);
+        }
     }
 
     @PluginMethod
@@ -67,8 +80,12 @@ public class LabelPrinterPlugin extends Plugin {
         String payload = call.getString("payload", "");
         Integer copiesValue = call.getInt("copies", 1);
         int copies = copiesValue != null ? copiesValue : 1;
-        manager.print(payload, copies);
-        call.resolve();
+        try {
+            manager.print(payload, copies);
+            call.resolve();
+        } catch (Exception exception) {
+            call.reject(exception.getMessage(), exception);
+        }
     }
 
     @PluginMethod

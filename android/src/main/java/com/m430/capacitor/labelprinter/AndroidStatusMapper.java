@@ -4,6 +4,7 @@ import com.getcapacitor.JSObject;
 import org.json.JSONException;
 
 public class AndroidStatusMapper {
+    public static final int STATE_UNKNOWN = -1;
     public static final int STATE_READY = 0;
     public static final int STATE_PAPER_OUT = 1;
     public static final int STATE_COVER_OPEN = 2;
@@ -27,6 +28,27 @@ public class AndroidStatusMapper {
             return new JSObject(payload);
         } catch (JSONException exception) {
             throw new IllegalStateException("Failed to map printer status", exception);
+        }
+    }
+
+    public JSObject disconnected(String message) {
+        String messageValue = message == null
+            ? "null"
+            : "\"" + message.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+        String payload = "{"
+            + "\"connected\":false,"
+            + "\"ready\":false,"
+            + "\"paperOut\":false,"
+            + "\"coverOpen\":false,"
+            + "\"overheating\":false,"
+            + "\"message\":" + messageValue + ","
+            + "\"raw\":null"
+            + "}";
+
+        try {
+            return new JSObject(payload);
+        } catch (JSONException exception) {
+            throw new IllegalStateException("Failed to map disconnected printer status", exception);
         }
     }
 }

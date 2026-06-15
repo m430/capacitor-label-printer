@@ -1,87 +1,132 @@
 package com.m430.capacitor.labelprinter;
 
-import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothDevice;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Set;
 
 public class AndroidPrinterManager {
-    private final BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-    private final AndroidStatusMapper statusMapper = new AndroidStatusMapper();
-    private boolean connected = false;
-    private String connectedDeviceId;
+    interface DeviceCatalog {
+        JSArray discover(List<String> prefixes);
 
-    public JSArray getBondedDevices(List<String> prefixes) {
-        JSArray devices = new JSArray();
-        if (adapter == null) {
-            return devices;
-        }
-
-        Set<BluetoothDevice> bonded = adapter.getBondedDevices();
-        for (BluetoothDevice device : bonded) {
-            if (!matchesPrefix(device.getName(), prefixes)) {
-                continue;
-            }
-            JSObject item = new JSObject();
-            item.put("id", device.getAddress());
-            item.put("name", device.getName());
-            item.put("address", device.getAddress());
-            item.put("transport", "classic");
-            item.put("bonded", true);
-            devices.put(item);
-        }
-        return devices;
+        PrinterSession openSession(String deviceId);
     }
 
-    public void connect(String deviceId) {
-        this.connected = true;
-        this.connectedDeviceId = deviceId;
+    interface PrinterSession {
+        void connect() throws IOException;
+
+        void disconnect();
+
+        boolean isConnected();
+
+        String getConnectionState();
+
+        String getDeviceName();
+
+        void print(byte[] payload) throws IOException;
+
+        byte[] queryStatus() throws IOException;
+    }
+
+    private final DeviceCatalog deviceCatalog;
+    private final AndroidStatusMapper statusMapper;
+    private PrinterSession session;
+    private String connectedDeviceId;
+
+    public AndroidPrinterManager(DeviceCatalog deviceCatalog, AndroidStatusMapper statusMapper) {
+        this.deviceCatalog = deviceCatalog;
+        this.statusMapper = statusMapper;
+    }
+
+    public JSArray getBondedDevices(List<String> prefixes) {
+        return deviceCatalog.discover(prefixes);
+    }
+
+    public void connect(String deviceId) throws IOException {
+        if (deviceId == null || deviceId.trim().isEmpty()) {
+            throw new IllegalArgumentException("deviceId is required");
+        }
+
+        PrinterSession nextSession = deviceCatalog.openSession(deviceId);
+        if (nextSession == null) {
+            throw new IllegalArgumentException("printer device not found: " + deviceId);
+        }
+
+        disconnect();
+        nextSession.connect();
+        session = nextSession;
+        connectedDeviceId = deviceId;
     }
 
     public void disconnect() {
-        this.connected = false;
-        this.connectedDeviceId = null;
+        if (session != null) {
+            session.disconnect();
+        }
+        session = null;
+        connectedDeviceId = null;
     }
 
-    public void print(String payload, int copies) {
-        byte[] bytes = payload.repeat(Math.max(copies, 1)).getBytes(StandardCharsets.UTF_8);
-        if (bytes.length == 0) {
+    public void print(String payload, int copies) throws IOException {
+        if (payload == null || payload.isEmpty()) {
             throw new IllegalArgumentException("payload is empty");
         }
-        if (!connected) {
-            throw new IllegalStateException("printer is not connected");
-        }
+        PrinterSession activeSession = requireSession();
+        activeSession.print(payload.repeat(Math.max(copies, 1)).getBytes(StandardCharsets.UTF_8));
     }
 
     public JSObject getConnectionState() {
         JSObject state = new JSObject();
-        state.put("state", connected ? "connected" : "disconnected");
+        state.put("state", session == null ? "disconnected" : session.getConnectionState());
         return state;
     }
 
     public JSObject getStatus() {
-        return statusMapper.toPluginStatus(
-            connected,
-            connected ? AndroidStatusMapper.STATE_READY : AndroidStatusMapper.STATE_PAPER_OUT,
-            connected ? "ready" : "disconnected"
-        );
+        if (session == null || !session.isConnected()) {
+            return statusMapper.disconnected("disconnected");
+        }
+
+        JSObject status = statusMapper.toPluginStatus(true, AndroidStatusMapper.STATE_READY, "ready");
+        status.put("deviceId", connectedDeviceId);
+        status.put("deviceName", session.getDeviceName());
+
+        try {
+            byte[] response = session.queryStatus();
+            if (response != null && response.length > 0) {
+                String rawText = new String(response, StandardCharsets.UTF_8).trim();
+                if (!rawText.isEmpty()) {
+                    status.put("raw", rawText);
+                    status.put("message", rawText);
+                    applyStatusHints(status, rawText);
+                }
+            }
+        } catch (IOException exception) {
+            status.put("message", exception.getMessage());
+        }
+
+        return status;
     }
 
-    private boolean matchesPrefix(String value, List<String> prefixes) {
-        if (value == null) {
-            return false;
+    private PrinterSession requireSession() {
+        if (session == null || !session.isConnected()) {
+            throw new IllegalStateException("printer is not connected");
         }
-        if (prefixes == null || prefixes.isEmpty()) {
-            return true;
+        return session;
+    }
+
+    private void applyStatusHints(JSObject status, String rawText) {
+        String normalized = rawText.toUpperCase();
+        if (normalized.contains("PAPER")) {
+            status.put("ready", false);
+            status.put("paperOut", true);
         }
-        for (String prefix : prefixes) {
-            if (value.startsWith(prefix)) {
-                return true;
-            }
+        if (normalized.contains("COVER") || normalized.contains("OPEN")) {
+            status.put("ready", false);
+            status.put("coverOpen", true);
         }
-        return false;
+        if (normalized.contains("HEAT")) {
+            status.put("ready", false);
+            status.put("overheating", true);
+        }
     }
 }
