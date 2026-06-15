@@ -12,6 +12,7 @@
     "android/libs/",
     "ios/Plugin/",
     "ios/VendorFrameworks/",
+    "M430CapacitorLabelPrinter.podspec",
     "capacitor-label-printer.podspec",
     "dist/"
   ],
