@@ -7,6 +7,7 @@
   "types": "dist/esm/index.d.ts",
   "unpkg": "dist/plugin.js",
   "files": [
+    "API.md",
     "android/src/main/",
     "android/build.gradle",
     "android/libs/",
@@ -25,6 +26,7 @@
   "bugs": {
     "url": "https://github.com/m430/capacitor-label-printer/issues"
   },
+  "homepage": "https://github.com/m430/capacitor-label-printer#readme",
   "keywords": [
     "capacitor",
     "plugin",
@@ -38,7 +40,7 @@
   "scripts": {
     "build": "npm run clean && npm run docgen && tsc && rollup -c rollup.config.mjs",
     "clean": "rimraf ./dist",
-    "docgen": "docgen --api LabelPrinterPlugin --output-readme README.md --output-json dist/docs.json",
+    "docgen": "docgen --api LabelPrinterPlugin --output-json dist/docs.json",
     "test:unit": "vitest run",
     "lint": "npm run eslint && npm run prettier -- --check",
     "fmt": "npm run eslint -- --fix && npm run prettier -- --write",
@@ -46,6 +48,8 @@
     "prettier": "prettier \"**/*.{md,ts,js,java,swift,html}\" --plugin=prettier-plugin-java",
     "verify": "npm run test:unit && npm run verify:android && npm run build",
     "verify:android": "cd android && ./gradlew clean test build && cd ..",
+    "verify:ios": "cd example-app && npx cap sync ios && xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug -destination 'generic/platform=iOS' build CODE_SIGNING_ALLOWED=NO",
+    "verify:release": "npm run verify && npm run verify:ios && npm pack --dry-run",
     "verify:web": "npm run build",
     "prepublishOnly": "npm run build"
   },
