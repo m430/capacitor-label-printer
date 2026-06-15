@@ -9,4 +9,6 @@ const LabelPrinter = registerPlugin<LabelPrinterPlugin>('LabelPrinter', {
 export * from './definitions';
 export * from './errors';
 export * from './types';
+export * from './tspl/builder';
+export * from './tspl/helpers';
 export { LabelPrinter };
