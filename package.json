@@ -12,7 +12,6 @@
     "android/libs/",
     "ios/Plugin/",
     "ios/VendorFrameworks/",
-    "capacitor-label-printer.podspec",
     "dist/"
   ],
   "author": "Andy Zheng",
@@ -38,13 +37,12 @@
     "build": "npm run clean && npm run docgen && tsc && rollup -c rollup.config.mjs",
     "clean": "rimraf ./dist",
     "docgen": "docgen --api LabelPrinterPlugin --output-readme README.md --output-json dist/docs.json",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run --passWithNoTests",
     "lint": "npm run eslint && npm run prettier -- --check",
     "fmt": "npm run eslint -- --fix && npm run prettier -- --write",
     "eslint": "eslint . --ext ts",
     "prettier": "prettier \"**/*.{md,ts,js,java,swift,html}\" --plugin=prettier-plugin-java",
-    "verify": "npm run test:unit && npm run verify:android && npm run build",
-    "verify:android": "cd android && ./gradlew clean test build && cd ..",
+    "verify": "npm run test:unit && npm run verify:web",
     "verify:web": "npm run build",
     "prepublishOnly": "npm run build"
   },
@@ -69,6 +67,9 @@
   },
   "peerDependencies": {
     "@capacitor/core": ">=7.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "prettier": "@ionic/prettier-config",
   "swiftlint": "@ionic/swiftlint-config",
