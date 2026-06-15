@@ -1,0 +1,8 @@
+node_modules
+dist
+android/build
+android/.gradle
+example-app/node_modules
+example-app/dist
+example-app/android
+example-app/ios
