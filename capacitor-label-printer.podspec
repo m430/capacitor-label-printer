@@ -13,6 +13,7 @@ Pod::Spec.new do |s|
   s.author = package['author']
   s.source = { git: repository_url, tag: s.version.to_s }
   s.source_files = 'ios/Plugin/**/*.{swift,h,m,mm}'
+  s.vendored_frameworks = 'ios/VendorFrameworks/*.framework', 'ios/VendorFrameworks/*.xcframework'
   s.preserve_paths = 'ios/VendorFrameworks/**/*'
   s.ios.deployment_target = '14.0'
   s.dependency 'Capacitor'
