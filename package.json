@@ -43,8 +43,8 @@
     "fmt": "npm run eslint -- --fix && npm run prettier -- --write",
     "eslint": "eslint . --ext ts",
     "prettier": "prettier \"**/*.{md,ts,js,java,swift,html}\" --plugin=prettier-plugin-java",
-    "verify": "npm run test:unit -- --passWithNoTests && npm run verify:android && npm run build",
-    "verify:android": "sh -c 'if [ -f android/gradlew ]; then cd android && sh ./gradlew clean test build; else echo \"跳过 Android 验证：未找到 android/gradlew\"; fi'",
+    "verify": "npm run test:unit && npm run verify:android && npm run build",
+    "verify:android": "cd android && ./gradlew clean test build && cd ..",
     "verify:web": "npm run build",
     "prepublishOnly": "npm run build"
   },

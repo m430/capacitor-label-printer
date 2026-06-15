@@ -43,5 +43,8 @@ dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
     implementation project(':capacitor-android')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
-    testImplementation "junit:junit:$junitVersion"
+    testImplementation files(
+        'gradle/test-libs/junit-4.13.2.jar',
+        'gradle/test-libs/hamcrest-core-1.3.jar'
+    )
 }
