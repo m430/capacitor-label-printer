@@ -51,7 +51,8 @@
     "verify:ios": "cd example-app && npx cap sync ios && xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug -destination 'generic/platform=iOS' build CODE_SIGNING_ALLOWED=NO",
     "verify:release": "npm run verify && npm run verify:ios && npm pack --dry-run",
     "verify:web": "npm run build",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "release": "bash scripts/release.sh"
   },
   "devDependencies": {
     "@capacitor/android": "^7.0.0",
