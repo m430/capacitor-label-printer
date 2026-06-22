@@ -14,14 +14,27 @@
 Promise<{ supported: boolean }>
 ```
 
-### `ensurePermissions()`
+### `checkPermissions()`
 
-确保蓝牙访问权限已就绪。
+查询当前蓝牙权限状态。
 
 返回：
 
 ```ts
-Promise<{ granted: boolean }>
+Promise<PrinterPermissionResult>
+```
+
+### `ensurePermissions()`
+
+确保蓝牙访问权限已就绪。
+
+- Android：会主动触发“附近设备”权限申请
+- iOS：首版会返回结构化权限状态，真实系统授权仍由蓝牙扫描/连接行为触发
+
+返回：
+
+```ts
+Promise<PrinterPermissionResult>
 ```
 
 ### `discoverDevices(options?)`
@@ -42,6 +55,11 @@ interface DiscoverDevicesOptions {
 ```ts
 Promise<{ devices: PrinterDevice[] }>
 ```
+
+说明：
+
+- Android 上如果权限不足，插件会在内部先尝试申请权限
+- 权限仍不足时会抛出 `PERMISSION_DENIED`
 
 ### `connect(options)`
 
@@ -104,7 +122,7 @@ interface PrintOptions {
 其中 `PrinterLanguage` 为：
 
 ```ts
-type PrinterLanguage = 'tspl' | 'raw';
+type PrinterLanguage = 'tspl' | 'cpcl' | 'raw';
 ```
 
 返回：
@@ -135,7 +153,36 @@ interface PrinterStatus {
 }
 ```
 
+### `openAppSettings()`
+
+跳转到应用系统设置页。
+
+返回：
+
+```ts
+Promise<void>
+```
+
 ## 主要类型
+
+### `PrinterPermissionResult`
+
+```ts
+interface PrinterPermissionResult {
+  granted: boolean;
+  canPrompt: boolean;
+  shouldOpenSettings: boolean;
+  permissions: {
+    bluetoothConnect?: PermissionState;
+    bluetoothScan?: PermissionState;
+    bluetooth?: PermissionState;
+  };
+}
+```
+
+```ts
+type PermissionState = 'prompt' | 'prompt-with-rationale' | 'granted' | 'denied';
+```
 
 ### `PrinterDevice`
 
@@ -154,15 +201,16 @@ interface PrinterDevice {
 type PrinterTransport = 'classic' | 'ble';
 ```
 
-## 导出的 TSPL 工具
+## 导出的 Builder 与 Helper
 
 除了 `LabelPrinter` 插件对象，包里还导出了：
 
+- `CpclBuilder`
 - `TsplBuilder`
 - `mmToDots`
 - `escapeTsplText`
 
-推荐业务层先用 `TsplBuilder` 组装 `payload`，再调用 `print()`。
+推荐业务层先用 `CpclBuilder` 或 `TsplBuilder` 组装 `payload`，再调用 `print()`。
 
 ## 额外说明
 

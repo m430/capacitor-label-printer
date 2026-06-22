@@ -7,6 +7,7 @@ import type {
   DiscoverDevicesOptions,
   LabelPrinterPlugin,
   PrintOptions,
+  PrinterPermissionResult,
   PrinterStatus,
 } from './definitions';
 import type { PrinterConnectionState } from './types';
@@ -16,7 +17,11 @@ export class LabelPrinterWeb extends WebPlugin implements LabelPrinterPlugin {
     return { supported: false };
   }
 
-  async ensurePermissions(): Promise<{ granted: boolean }> {
+  async checkPermissions(): Promise<PrinterPermissionResult> {
+    throw new Error(UNSUPPORTED_WEB_ERROR);
+  }
+
+  async ensurePermissions(): Promise<PrinterPermissionResult> {
     throw new Error(UNSUPPORTED_WEB_ERROR);
   }
 
@@ -42,5 +47,9 @@ export class LabelPrinterWeb extends WebPlugin implements LabelPrinterPlugin {
 
   async getStatus(): Promise<PrinterStatus> {
     return { connected: false, message: UNSUPPORTED_WEB_ERROR };
+  }
+
+  async openAppSettings(): Promise<void> {
+    throw new Error(UNSUPPORTED_WEB_ERROR);
   }
 }

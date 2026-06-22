@@ -1,5 +1,6 @@
 package com.m430.capacitor.labelprinter;
 
+import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.Context;
@@ -22,6 +23,7 @@ final class VendorAndroidDeviceCatalog implements AndroidPrinterManager.DeviceCa
     }
 
     @Override
+    @SuppressLint("MissingPermission")
     public JSArray discover(List<String> prefixes) {
         JSArray devices = new JSArray();
         if (adapter == null || !bluetooth.hasConnectPermission(appContext)) {
@@ -47,6 +49,7 @@ final class VendorAndroidDeviceCatalog implements AndroidPrinterManager.DeviceCa
     }
 
     @Override
+    @SuppressLint("MissingPermission")
     public AndroidPrinterManager.PrinterSession openSession(String deviceId) {
         if (adapter == null || deviceId == null || !bluetooth.hasConnectPermission(appContext)) {
             return null;

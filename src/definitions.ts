@@ -1,3 +1,5 @@
+import type { PermissionState } from '@capacitor/core';
+
 import type { PrinterConnectionState, PrinterLanguage, PrinterTransport } from './types';
 
 /**
@@ -49,6 +51,20 @@ export interface PrinterStatus {
   raw?: unknown;
 }
 
+/**
+ * 插件统一输出的权限状态。
+ */
+export interface PrinterPermissionResult {
+  granted: boolean;
+  canPrompt: boolean;
+  shouldOpenSettings: boolean;
+  permissions: {
+    bluetoothConnect?: PermissionState;
+    bluetoothScan?: PermissionState;
+    bluetooth?: PermissionState;
+  };
+}
+
 export interface LabelPrinterPlugin {
   /**
    * 判断当前运行环境是否支持原生标签打印。
@@ -56,9 +72,14 @@ export interface LabelPrinterPlugin {
   isSupported(): Promise<{ supported: boolean }>;
 
   /**
+   * 查询当前蓝牙访问权限状态。
+   */
+  checkPermissions(): Promise<PrinterPermissionResult>;
+
+  /**
    * 确保蓝牙访问权限已就绪。
    */
-  ensurePermissions(): Promise<{ granted: boolean }>;
+  ensurePermissions(): Promise<PrinterPermissionResult>;
 
   /**
    * 发现可用于连接的打印机列表。
@@ -89,4 +110,9 @@ export interface LabelPrinterPlugin {
    * 查询当前打印机状态。
    */
   getStatus(): Promise<PrinterStatus>;
+
+  /**
+   * 跳转到应用系统设置页。
+   */
+  openAppSettings(): Promise<void>;
 }

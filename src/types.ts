@@ -6,7 +6,7 @@ export type PrinterTransport = 'classic' | 'ble';
 /**
  * 打印负载的协议类型。
  */
-export type PrinterLanguage = 'tspl' | 'raw';
+export type PrinterLanguage = 'tspl' | 'cpcl' | 'raw';
 
 /**
  * 统一连接状态枚举。

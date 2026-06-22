@@ -40,9 +40,10 @@ public class AndroidPrinterManagerTest {
         AndroidPrinterManager manager = new AndroidPrinterManager(catalog, new AndroidStatusMapper());
         manager.connect("AA:BB:CC");
 
-        manager.print("TEST", 2);
+        manager.print("TEST", "cpcl", 2);
 
         assertArrayEquals("TESTTEST".getBytes(StandardCharsets.UTF_8), session.lastPayload);
+        assertEquals("cpcl", session.lastLanguage);
     }
 
     @Test
@@ -80,6 +81,7 @@ public class AndroidPrinterManagerTest {
         private boolean connectCalled;
         private boolean connected;
         private byte[] lastPayload;
+        private String lastLanguage;
 
         @Override
         public void connect() {
@@ -108,7 +110,8 @@ public class AndroidPrinterManagerTest {
         }
 
         @Override
-        public void print(byte[] payload) {
+        public void print(String language, byte[] payload) {
+            lastLanguage = language;
             lastPayload = payload;
         }
 

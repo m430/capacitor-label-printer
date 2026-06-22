@@ -1,22 +1,32 @@
 package com.m430.capacitor.labelprinter;
 
+import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothDevice;
 import com.printer.psdk.device.adapter.ConnectedDevice;
 import com.printer.psdk.device.adapter.ReadOptions;
 import com.printer.psdk.device.adapter.types.WroteReporter;
+import com.printer.psdk.frame.father.args.common.Raw;
 import com.printer.psdk.device.bluetooth.Bluetooth;
 import com.printer.psdk.device.bluetooth.ConnectListener;
 import com.printer.psdk.device.bluetooth.Connection;
 import com.printer.psdk.tspl.GenericTSPL;
 import com.printer.psdk.tspl.TSPL;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 final class VendorAndroidPrinterSession implements AndroidPrinterManager.PrinterSession {
     private final Connection connection;
+    private final TsplTransport tsplTransport;
     private final VendorConnectListener listener = new VendorConnectListener();
 
     VendorAndroidPrinterSession(Bluetooth bluetooth, BluetoothDevice device) {
         connection = bluetooth.createConnectionClassic(device, listener);
+        tsplTransport = new SdkTsplTransport(connection);
+    }
+
+    VendorAndroidPrinterSession(Connection connection, TsplTransport tsplTransport) {
+        this.connection = connection;
+        this.tsplTransport = tsplTransport;
     }
 
     @Override
@@ -62,6 +72,7 @@ final class VendorAndroidPrinterSession implements AndroidPrinterManager.Printer
     }
 
     @Override
+    @SuppressLint("MissingPermission")
     public String getDeviceName() {
         if (connection == null || connection.getDevice() == null) {
             return null;
@@ -69,10 +80,18 @@ final class VendorAndroidPrinterSession implements AndroidPrinterManager.Printer
         return connection.getDevice().getName();
     }
 
-    @Override
     public void print(byte[] payload) throws IOException {
+        print("tspl", payload);
+    }
+
+    @Override
+    public void print(String language, byte[] payload) throws IOException {
         if (connection == null) {
             throw new IOException("printer connection is unavailable");
+        }
+        if (isTsplLanguage(language)) {
+            tsplTransport.send(payload);
+            return;
         }
         connection.write(payload);
     }
@@ -82,16 +101,67 @@ final class VendorAndroidPrinterSession implements AndroidPrinterManager.Printer
         if (connection == null) {
             return null;
         }
+        return tsplTransport.queryStatus();
+    }
 
-        GenericTSPL tspl = TSPL.generic(connection).state();
-        WroteReporter reporter = tspl.write();
-        if (!reporter.isOk()) {
+    interface TsplTransport {
+        void send(byte[] payload) throws IOException;
+
+        byte[] queryStatus() throws IOException;
+    }
+
+    static final class SdkTsplTransport implements TsplTransport {
+        private final Connection connection;
+
+        SdkTsplTransport(Connection connection) {
+            this.connection = connection;
+        }
+
+        @Override
+        public void send(byte[] payload) throws IOException {
+            String[] commands = splitCommands(payload);
+            if (commands.length == 0) {
+                throw new IOException("tspl payload does not contain any printable commands");
+            }
+
+            GenericTSPL tspl = TSPL.generic(connection);
+            for (String command : commands) {
+                tspl.raw(Raw.builder().command(command, StandardCharsets.UTF_8).build());
+            }
+            requireReporterOk(tspl.write(), "failed to write tspl payload");
+        }
+
+        @Override
+        public byte[] queryStatus() throws IOException {
+            GenericTSPL tspl = TSPL.generic(connection).state();
+            requireReporterOk(tspl.write(), "failed to query printer status");
+            return tspl.read(ReadOptions.builder().timeout(1500).build());
+        }
+
+        static String[] splitCommands(byte[] payload) {
+            return new String(payload, StandardCharsets.UTF_8)
+                .replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .lines()
+                .map(String::trim)
+                .filter(command -> !command.isEmpty())
+                .toArray(String[]::new);
+        }
+
+        private static void requireReporterOk(WroteReporter reporter, String fallbackMessage) throws IOException {
+            if (reporter.isOk()) {
+                return;
+            }
+
             throw new IOException(
-                reporter.getException() != null ? reporter.getException().getMessage() : "failed to query printer status",
+                reporter.getException() != null ? reporter.getException().getMessage() : fallbackMessage,
                 reporter.getException()
             );
         }
-        return tspl.read(ReadOptions.builder().timeout(1500).build());
+    }
+
+    private static boolean isTsplLanguage(String language) {
+        return language == null || language.trim().isEmpty() || "tspl".equalsIgnoreCase(language);
     }
 
     private static final class VendorConnectListener implements ConnectListener {

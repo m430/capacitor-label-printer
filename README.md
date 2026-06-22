@@ -1,6 +1,6 @@
 # @m430/capacitor-label-printer
 
-面向启锐 `QR-365` 及同类 `TSPL` 标签热敏打印机的 `Capacitor 7` 插件。
+面向启锐 `QR-365` 及同类标签热敏打印机的 `Capacitor 7` 插件，内置 `CPCL` / `TSPL` 指令发送能力。
 
 这个包的目标不是把业务模板写死在插件里，而是提供一层可复用的原生打印通道，统一暴露设备发现、连接、状态查询和标签打印能力，并随 npm 包分发 Android `jar` 与 iOS `framework`。
 
@@ -8,7 +8,7 @@
 
 - 已完成独立仓库、npm 包、Capacitor 插件骨架和 `example-app`
 - 已完成 Android `jar` 与 iOS `framework` 的随包分发
-- 已完成统一 JS API、`TSPL` builder、Android/iOS 编译链路验证
+- 已完成统一 JS API、`CPCL` / `TSPL` builder、Android/iOS 编译链路验证
 - 当前 `AndroidPrinterManager` 与 `IOSPrinterManager` 仍是首版骨架，真实厂商 SDK 的会话管理、写入和状态回传逻辑需要继续结合真机联调补齐
 
 ## 安装
@@ -29,20 +29,17 @@ npx cap add ios
 
 ### Android
 
-宿主项目需要在自己的 `AndroidManifest.xml` 中声明蓝牙相关权限。常见最小集合如下：
+Android 蓝牙权限已经随插件一起分发并参与宿主 Manifest 合并，通常不需要宿主项目再手写：
 
-```xml
-<uses-permission android:name="android.permission.BLUETOOTH" />
-<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-```
+- `BLUETOOTH`、`BLUETOOTH_ADMIN`，并带 `maxSdkVersion=30`
+- `BLUETOOTH_CONNECT`
+- `BLUETOOTH_SCAN`，并带 `neverForLocation`
 
-说明：
+体验约定：
 
-- Android 12 及以上重点使用 `BLUETOOTH_CONNECT` 与 `BLUETOOTH_SCAN`
-- Android 11 及以下如果做扫描，通常仍需要位置权限
+- 首次调用 `discoverDevices()` 时，插件会自动触发“附近设备”权限申请
+- 也可以先主动调用 `ensurePermissions()`，拿到结构化权限状态后再决定是否继续
+- 如果用户永久拒绝权限，可调用 `openAppSettings()` 引导跳转系统设置页
 
 ### iOS
 
@@ -58,7 +55,7 @@ npx cap add ios
 ## 快速使用
 
 ```ts
-import { LabelPrinter, TsplBuilder } from '@m430/capacitor-label-printer';
+import { CpclBuilder, LabelPrinter } from '@m430/capacitor-label-printer';
 
 async function printDemoLabel() {
   const support = await LabelPrinter.isSupported();
@@ -66,7 +63,13 @@ async function printDemoLabel() {
     throw new Error('当前平台不支持原生标签打印');
   }
 
-  await LabelPrinter.ensurePermissions();
+  const permissionResult = await LabelPrinter.ensurePermissions();
+  if (!permissionResult.granted) {
+    if (permissionResult.shouldOpenSettings) {
+      await LabelPrinter.openAppSettings();
+    }
+    throw new Error('需要先允许蓝牙附近设备权限');
+  }
 
   const { devices } = await LabelPrinter.discoverDevices({
     namePrefixes: ['QR', 'QIRUI', 'BEEPRT']
@@ -78,19 +81,18 @@ async function printDemoLabel() {
 
   await LabelPrinter.connect({ deviceId: devices[0].id });
 
-  const payload = new TsplBuilder()
-    .sizeMm(100, 150)
-    .gapMm(2, 0)
-    .density(8)
-    .cls()
-    .text(40, 40, '3', 0, 1, 1, 'YT1234567890')
-    .barcode128(40, 100, 80, true, 0, 2, 2, 'YT1234567890')
-    .printCopies(1)
+  const payload = new CpclBuilder()
+    .page(640, 1)
+    .pageWidth(576)
+    .text(4, 0, 40, 40, 'YT1234567890')
+    .barcode128(40, 120, 80, 'YT1234567890')
+    .form()
+    .print()
     .build();
 
   await LabelPrinter.print({
     payload,
-    language: 'tspl',
+    language: 'cpcl',
     copies: 1
   });
 
@@ -104,6 +106,7 @@ async function printDemoLabel() {
 插件当前公开这些方法：
 
 - `isSupported`
+- `checkPermissions`
 - `ensurePermissions`
 - `discoverDevices`
 - `connect`
@@ -111,13 +114,16 @@ async function printDemoLabel() {
 - `getConnectionState`
 - `print`
 - `getStatus`
+- `openAppSettings`
 
 完整 API 文档见 [API.md](./API.md)。
 
-## TSPL Helper
+## Helper
 
-已内置 `TsplBuilder` 与基础 helper，适合物流面单、条码标签这类“一张一张打”的场景：
+已内置 `CpclBuilder`、`TsplBuilder` 与基础 helper，适合物流面单、条码标签这类“一张一张打”的场景：
 
+- `page`
+- `pageWidth`
 - `sizeMm`
 - `gapMm`
 - `density`
@@ -135,12 +141,14 @@ async function printDemoLabel() {
 - 当前集成的是厂商 `TSPL classic bluetooth` 方向的 `jar`
 - 插件包内已带上 `android/libs/fat-generic-tspl-bluetooth-classic-0.1.16-GA.jar`
 - 现阶段 `discoverDevices` 主要基于已配对设备过滤，适合作为 `QR-365` 的首版接入基线
+- `discoverDevices()` 与 `connect()` 会在 Android 12+ 自动兜底附近设备权限
 
 ### iOS
 
 - 当前包内已带上 `ios/VendorFrameworks/` 下的厂商 `framework`
 - `CocoaPods` 集成使用的是 `M430CapacitorLabelPrinter.podspec`
 - 已验证 `npx cap sync ios` 与 `xcodebuild` 编译链路可通过
+- iOS 仍需要宿主在 `Info.plist` 中声明蓝牙用途说明
 
 ### Web
 

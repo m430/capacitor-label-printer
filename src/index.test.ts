@@ -14,4 +14,14 @@ describe('LabelPrinterWeb', () => {
 
     await expect(plugin.ensurePermissions()).rejects.toThrow('Label printing is not supported on web.');
   });
+
+  it('throws for additional permission helpers on web', async () => {
+    const plugin = new LabelPrinterWeb() as unknown as {
+      checkPermissions: () => Promise<unknown>;
+      openAppSettings: () => Promise<void>;
+    };
+
+    await expect(plugin.checkPermissions()).rejects.toThrow('Label printing is not supported on web.');
+    await expect(plugin.openAppSettings()).rejects.toThrow('Label printing is not supported on web.');
+  });
 });

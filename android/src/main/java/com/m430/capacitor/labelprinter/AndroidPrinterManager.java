@@ -24,7 +24,7 @@ public class AndroidPrinterManager {
 
         String getDeviceName();
 
-        void print(byte[] payload) throws IOException;
+        void print(String language, byte[] payload) throws IOException;
 
         byte[] queryStatus() throws IOException;
     }
@@ -67,12 +67,12 @@ public class AndroidPrinterManager {
         connectedDeviceId = null;
     }
 
-    public void print(String payload, int copies) throws IOException {
+    public void print(String payload, String language, int copies) throws IOException {
         if (payload == null || payload.isEmpty()) {
             throw new IllegalArgumentException("payload is empty");
         }
         PrinterSession activeSession = requireSession();
-        activeSession.print(payload.repeat(Math.max(copies, 1)).getBytes(StandardCharsets.UTF_8));
+        activeSession.print(language, payload.repeat(Math.max(copies, 1)).getBytes(StandardCharsets.UTF_8));
     }
 
     public JSObject getConnectionState() {
