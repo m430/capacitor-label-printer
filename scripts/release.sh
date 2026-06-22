@@ -3,53 +3,59 @@
 # @m430/capacitor-label-printer 自动化发布脚本
 #
 # 用法:
-#   npm run release                        交互式选择版本级别
-#   npm run release -- patch               补丁版本 (0.0.x)
-#   npm run release -- minor               次版本   (0.x.0)
-#   npm run release -- major               主版本   (x.0.0)
-#   npm run release -- prerelease          预发布版本
-#   npm run release -- 1.2.3               指定具体版本号
-#   npm run release -- patch --dry-run     干跑模式（不发布、不推送）
-#   npm run release -- prerelease --preid beta  带预发布标识 (如 0.1.0-beta.0)
+#   npm run release                    交互式选择发布方式
+#   npm run release -- --dry-run       干跑模式（不发布、不推送）
 #
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PACKAGE_JSON="${ROOT_DIR}/package.json"
+PACKAGE_LOCK="${ROOT_DIR}/package-lock.json"
 
-# ---------- 输出工具 ----------
-info()  { printf "\033[0;34mℹ\033[0m  %s\n" "$1"; }
-ok()    { printf "\033[0;32m✓\033[0m  %s\n" "$1"; }
-warn()  { printf "\033[1;33m⚠\033[0m  %s\n" "$1"; }
-err()   { printf "\033[0;31m✗\033[0m  %s\n" "$1"; }
+cd "${ROOT_DIR}"
 
 # ---------- 参数解析 ----------
-BUMP=""
 DRY_RUN=false
-PREID=""
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    patch|minor|major|prerelease)
-      BUMP="$1"; shift ;;
-    --dry-run)
-      DRY_RUN=true; shift ;;
-    --preid)
-      PREID="$2"; shift 2 ;;
-    --preid=*)
-      PREID="${1#*=}"; shift ;;
-    -h|--help)
-      sed -n '2,16p' "$0"; exit 0 ;;
-    --*)
-      err "未知选项: $1"; exit 1 ;;
-    *)
-      if [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
-        BUMP="$1"
-      else
-        err "未知参数: $1"; exit 1
-      fi
-      shift ;;
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=true ;;
+    -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+    *) echo "未知参数: $arg"; exit 1 ;;
   esac
 done
+
+# ---------- 输出工具 ----------
+info()  { printf "\033[0;34m>> [Release]\033[0m %s\n" "$1"; }
+ok()    { printf "\033[0;32m>> [Release]\033[0m %s\n" "$1"; }
+warn()  { printf "\033[1;33m>> [Release]\033[0m %s\n" "$1"; }
+err()   { printf "\033[0;31m>> [Release]\033[0m %s\n" "$1"; }
+
+# ---------- 同步版本号到 package.json / package-lock.json ----------
+sync_version_files() {
+  local target_version="$1"
+  node --input-type=commonjs - "${PACKAGE_JSON}" "${PACKAGE_LOCK}" "${target_version}" <<'EOF'
+const fs = require('fs');
+const packageJsonPath = process.argv[2];
+const packageLockPath = process.argv[3];
+const targetVersion = process.argv[4];
+const writeJson = (filePath, data) => {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n');
+};
+const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+pkg.version = targetVersion;
+writeJson(packageJsonPath, pkg);
+if (fs.existsSync(packageLockPath)) {
+  const lock = JSON.parse(fs.readFileSync(packageLockPath, 'utf8'));
+  lock.version = targetVersion;
+  if (lock.packages && lock.packages['']) {
+    lock.packages[''].version = targetVersion;
+  }
+  writeJson(packageLockPath, lock);
+}
+EOF
+}
 
 # ---------- 前置检查 ----------
 
@@ -81,16 +87,16 @@ fi
 
 # 3. 当前分支
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
-info "当前分支: $BRANCH"
+info "当前分支: ${BRANCH}"
 if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "master" ]; then
   warn "当前不在 main/master 分支"
   read -r -p "是否继续发布? (y/N) " confirm
   if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-    err "已取消"; exit 1
+    err "已取消"; exit 0
   fi
 fi
 
-# 4. git 身份配置（正式发布时 npm version commit 需要）
+# 4. git 身份配置（正式发布时需要）
 if [ "$DRY_RUN" = false ]; then
   if [ -z "$(git config user.name)" ] || [ -z "$(git config user.email)" ]; then
     err "未配置 git user.name / user.email，提交版本号需要 git 身份信息"
@@ -100,48 +106,75 @@ if [ "$DRY_RUN" = false ]; then
   ok "git 身份: $(git config user.name) <$(git config user.email)>"
 fi
 
-# ---------- 确定版本号 ----------
+# ---------- 版本号选择 ----------
 
-CURRENT_VERSION=$(node -p "require('./package.json').version")
-info "当前版本: $CURRENT_VERSION"
+CURRENT_VERSION="$(node -p "require('${PACKAGE_JSON}').version")"
 
-if [ -z "$BUMP" ]; then
-  echo ""
-  echo "请选择发布级别:"
-  echo "  1) patch"
-  echo "  2) minor"
-  echo "  3) major"
-  echo "  4) prerelease"
-  read -r -p "输入数字 [1-4]: " choice
-  case "$choice" in
-    1) BUMP="patch" ;;
-    2) BUMP="minor" ;;
-    3) BUMP="major" ;;
-    4) BUMP="prerelease" ;;
-    *) err "无效选择"; exit 1 ;;
+if [ -z "${CURRENT_VERSION}" ]; then
+  err "未能从 package.json 中解析到 version 字段"
+  exit 1
+fi
+
+IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT_VERSION}"
+
+if [ -z "${MAJOR:-}" ] || [ -z "${MINOR:-}" ] || [ -z "${PATCH:-}" ]; then
+  err "当前版本号格式不合法: ${CURRENT_VERSION}"
+  exit 1
+fi
+
+if ! [[ "${MAJOR}" =~ ^[0-9]+$ && "${MINOR}" =~ ^[0-9]+$ && "${PATCH}" =~ ^[0-9]+$ ]]; then
+  err "当前版本号格式不合法: ${CURRENT_VERSION}"
+  exit 1
+fi
+
+NEXT_PATCH=$((PATCH + 1))
+NEXT_VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}"
+
+echo ""
+echo "当前版本: ${CURRENT_VERSION}"
+echo "建议下一个版本: ${NEXT_VERSION}"
+echo ""
+echo "请选择本次发布方式:"
+echo "1. 升级到 ${NEXT_VERSION} 并继续发布"
+echo "2. 保持 ${CURRENT_VERSION} 并继续发布"
+echo "3. 取消发布"
+
+while true; do
+  printf "请输入 [1/2/3]: "
+  read -r CHOICE
+
+  case "${CHOICE}" in
+    1)
+      RELEASE_VERSION="${NEXT_VERSION}"
+      echo "版本已更新为: ${NEXT_VERSION}"
+      break
+      ;;
+    2)
+      RELEASE_VERSION="${CURRENT_VERSION}"
+      echo "保留当前版本: ${CURRENT_VERSION}"
+      break
+      ;;
+    3)
+      echo "已取消本次发布"
+      exit 0
+      ;;
+    *)
+      echo "无效输入，请输入 1、2 或 3"
+      ;;
   esac
-fi
+done
 
-# 计算下一个版本号
-if [[ "$BUMP" =~ ^[0-9] ]]; then
-  NEXT_VERSION="$BUMP"
-else
-  if [ "$DRY_RUN" = true ]; then
-    # dry-run: 备份后计算再恢复，避免丢失未提交的改动
-    cp package.json package.json.bak
-    [ -f package-lock.json ] && cp package-lock.json package-lock.json.bak
-    NEXT_VERSION=$(npm version "$BUMP" --no-git-tag-version $([ -n "$PREID" ] && echo "--preid $PREID") 2>/dev/null | sed 's/^v//')
-    mv package.json.bak package.json
-    [ -f package-lock.json.bak ] && mv package-lock.json.bak package-lock.json
-  else
-    NEXT_VERSION=$(npm version "$BUMP" --no-git-tag-version $([ -n "$PREID" ] && echo "--preid $PREID") 2>/dev/null | sed 's/^v//')
-  fi
-fi
+# ---------- 同步版本号 ----------
 
 if [ "$DRY_RUN" = true ]; then
-  info "[dry-run] 目标版本: $CURRENT_VERSION -> $NEXT_VERSION"
+  info "[dry-run] 目标版本: ${RELEASE_VERSION}（不修改文件）"
 else
-  info "目标版本: $CURRENT_VERSION -> $NEXT_VERSION"
+  if [ "${RELEASE_VERSION}" != "${CURRENT_VERSION}" ]; then
+    sync_version_files "${RELEASE_VERSION}"
+    info "版本号已同步: ${CURRENT_VERSION} -> ${RELEASE_VERSION}"
+  else
+    info "保持当前版本: ${CURRENT_VERSION}"
+  fi
 fi
 
 # ---------- 运行测试与构建 ----------
@@ -167,13 +200,7 @@ fi
 
 # ---------- 正式发布 ----------
 
-# 版本号已在上面通过 npm version --no-git-tag-version 更新到 package.json
-# 现在提交版本变更并打 tag
-info "提交版本变更并创建 git tag..."
-git add package.json package-lock.json 2>/dev/null || git add package.json
-git commit -m "chore(release): $NEXT_VERSION" >/dev/null 2>&1 || warn "版本提交可能已存在"
-git tag -a "v$NEXT_VERSION" -m "Release $NEXT_VERSION" 2>/dev/null || warn "tag v$NEXT_VERSION 可能已存在"
-ok "已创建 tag: v$NEXT_VERSION"
+info "本次发布版本: ${RELEASE_VERSION}"
 
 # 预览包内容
 echo ""
@@ -181,19 +208,31 @@ info "预览发布包内容:"
 npm pack --dry-run
 echo ""
 
+# git commit + tag
+info "提交版本变更并创建 git tag..."
+git add package.json package-lock.json 2>/dev/null || git add package.json
+if git diff --cached --quiet; then
+  warn "当前没有可提交内容，跳过 Git 提交"
+else
+  git commit -m "chore(release): ${RELEASE_VERSION}" >/dev/null 2>&1
+  ok "已创建提交: chore(release): ${RELEASE_VERSION}"
+fi
+git tag -a "v${RELEASE_VERSION}" -m "Release ${RELEASE_VERSION}" 2>/dev/null || warn "tag v${RELEASE_VERSION} 可能已存在"
+ok "已创建 tag: v${RELEASE_VERSION}"
+
 # 发布到 npm
-info "发布 $NEXT_VERSION 到 npm..."
+info "发布 ${RELEASE_VERSION} 到 npm registry..."
 npm publish --access public
-ok "已发布 $NEXT_VERSION 到 npm"
+ok "已发布 ${RELEASE_VERSION} 到 npm"
 
 # 推送 git commit 与 tag
 info "推送 git commit 与 tag..."
-git push origin "$BRANCH"
-git push origin "v$NEXT_VERSION"
+git push origin "${BRANCH}"
+git push origin "v${RELEASE_VERSION}"
 ok "已推送到远程仓库"
 
 echo ""
 ok "================================================"
-ok "  发布完成!  $CURRENT_VERSION -> $NEXT_VERSION"
+ok "  发布完成!  ${CURRENT_VERSION} -> ${RELEASE_VERSION}"
 ok "  npm: https://www.npmjs.com/package/@m430/capacitor-label-printer"
 ok "================================================"
