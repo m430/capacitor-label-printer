@@ -2,6 +2,7 @@ package com.m430.capacitor.labelprinter;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 
 import android.bluetooth.BluetoothDevice;
 import com.printer.psdk.device.adapter.ReadOptions;
@@ -49,9 +50,51 @@ public class VendorAndroidPrinterSessionTest {
         assertEquals(null, transport.lastPayload);
     }
 
+    @Test
+    public void queryStatusSkipsTsplCommandAfterCpclPrint() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        FakeTsplTransport transport = new FakeTsplTransport();
+        VendorAndroidPrinterSession session = new VendorAndroidPrinterSession(connection, transport);
+
+        session.print("cpcl", "! 0 200 200 640 1\nPRINT\n".getBytes());
+        byte[] result = session.queryStatus();
+
+        assertNull(result);
+        assertEquals(0, transport.queryStatusCalls);
+    }
+
+    @Test
+    public void queryStatusUsesTsplTransportAfterTsplPrint() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        FakeTsplTransport transport = new FakeTsplTransport();
+        transport.queryStatusReturnValue = "READY".getBytes();
+        VendorAndroidPrinterSession session = new VendorAndroidPrinterSession(connection, transport);
+
+        session.print("tspl", "SIZE 75 mm,130 mm\nPRINT 1,1\n".getBytes());
+        byte[] result = session.queryStatus();
+
+        assertArrayEquals("READY".getBytes(), result);
+        assertEquals(1, transport.queryStatusCalls);
+    }
+
+    @Test
+    public void queryStatusUsesTsplTransportByDefaultBeforeAnyPrint() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        FakeTsplTransport transport = new FakeTsplTransport();
+        transport.queryStatusReturnValue = "READY".getBytes();
+        VendorAndroidPrinterSession session = new VendorAndroidPrinterSession(connection, transport);
+
+        byte[] result = session.queryStatus();
+
+        assertArrayEquals("READY".getBytes(), result);
+        assertEquals(1, transport.queryStatusCalls);
+    }
+
     private static final class FakeTsplTransport implements VendorAndroidPrinterSession.TsplTransport {
         private byte[] lastPayload;
         private IOException writeException;
+        private int queryStatusCalls;
+        private byte[] queryStatusReturnValue;
 
         @Override
         public void send(byte[] payload) throws IOException {
@@ -63,7 +106,8 @@ public class VendorAndroidPrinterSessionTest {
 
         @Override
         public byte[] queryStatus() {
-            return null;
+            queryStatusCalls++;
+            return queryStatusReturnValue;
         }
     }
 

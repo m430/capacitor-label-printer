@@ -18,6 +18,7 @@ final class VendorAndroidPrinterSession implements AndroidPrinterManager.Printer
     private final Connection connection;
     private final TsplTransport tsplTransport;
     private final VendorConnectListener listener = new VendorConnectListener();
+    private String activeLanguage;
 
     VendorAndroidPrinterSession(Bluetooth bluetooth, BluetoothDevice device) {
         connection = bluetooth.createConnectionClassic(device, listener);
@@ -89,6 +90,7 @@ final class VendorAndroidPrinterSession implements AndroidPrinterManager.Printer
         if (connection == null) {
             throw new IOException("printer connection is unavailable");
         }
+        this.activeLanguage = language;
         if (isTsplLanguage(language)) {
             tsplTransport.send(payload);
             return;
@@ -98,7 +100,7 @@ final class VendorAndroidPrinterSession implements AndroidPrinterManager.Printer
 
     @Override
     public byte[] queryStatus() throws IOException {
-        if (connection == null) {
+        if (connection == null || !isTsplLanguage(activeLanguage)) {
             return null;
         }
         return tsplTransport.queryStatus();
