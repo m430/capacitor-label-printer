@@ -119,7 +119,7 @@ final class IOSPrinterManager: NSObject {
         )
     }
 
-    func print(payload: String, copies: Int) throws {
+    func print(payload: String, language: String, copies: Int) throws {
         if !connected {
             throw NSError(
                 domain: "LabelPrinter",
@@ -134,10 +134,11 @@ final class IOSPrinterManager: NSObject {
                 userInfo: [NSLocalizedDescriptionKey: "invalid print payload"]
             )
         }
+        let encoding = resolvePayloadEncoding(language)
         guard let binary = payload
             .replacingOccurrences(of: "\r\n", with: "\n")
             .repeatString(max(copies, 1))
-            .data(using: .utf8) else {
+            .data(using: encoding) else {
             throw NSError(
                 domain: "LabelPrinter",
                 code: 6,
@@ -146,6 +147,14 @@ final class IOSPrinterManager: NSObject {
         }
 
         printer.write(binary)
+    }
+
+    private func resolvePayloadEncoding(_ language: String) -> String.Encoding {
+        let lowercased = language.lowercased()
+        if lowercased == "cpcl" || lowercased == "raw" {
+            return .isoLatin1
+        }
+        return .utf8
     }
 
     private func shouldKeep(peripheral: CBPeripheral) -> Bool {

@@ -63,7 +63,7 @@ public class LabelPrinterPlugin: CAPPlugin {
 
     @objc func print(_ call: CAPPluginCall) {
         do {
-            try manager.print(payload: call.getString("payload", ""), copies: call.getInt("copies", 1))
+            try manager.print(payload: call.getString("payload", ""), language: call.getString("language", "tspl"), copies: call.getInt("copies", 1))
             call.resolve()
         } catch {
             call.reject(error.localizedDescription)

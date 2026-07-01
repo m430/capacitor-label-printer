@@ -13,8 +13,12 @@ import com.printer.psdk.tspl.GenericTSPL;
 import com.printer.psdk.tspl.TSPL;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 final class VendorAndroidPrinterSession implements AndroidPrinterManager.PrinterSession {
+    private static final int RAW_WRITE_CHUNK_SIZE = 1024;
+    private static final int RAW_WRITE_CHUNK_DELAY_MS = 20;
+
     private final Connection connection;
     private final TsplTransport tsplTransport;
     private final VendorConnectListener listener = new VendorConnectListener();
@@ -95,7 +99,36 @@ final class VendorAndroidPrinterSession implements AndroidPrinterManager.Printer
             tsplTransport.send(payload);
             return;
         }
-        connection.write(payload);
+        writeRawPayload(payload);
+    }
+
+    private void writeRawPayload(byte[] payload) throws IOException {
+        if (connection == null) {
+            throw new IOException("printer connection is unavailable");
+        }
+        if (!connection.isConnected()) {
+            throw new IOException("printer is not connected");
+        }
+
+        int offset = 0;
+        while (offset < payload.length) {
+            if (!connection.isConnected()) {
+                throw new IOException("printer connection lost during write");
+            }
+
+            int length = Math.min(RAW_WRITE_CHUNK_SIZE, payload.length - offset);
+            connection.write(Arrays.copyOfRange(payload, offset, offset + length));
+            offset += length;
+
+            if (offset < payload.length && RAW_WRITE_CHUNK_DELAY_MS > 0) {
+                try {
+                    Thread.sleep(RAW_WRITE_CHUNK_DELAY_MS);
+                } catch (InterruptedException interruptedException) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("write interrupted", interruptedException);
+                }
+            }
+        }
     }
 
     @Override

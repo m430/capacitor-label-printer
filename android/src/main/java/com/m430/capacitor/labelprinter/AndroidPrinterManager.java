@@ -72,7 +72,17 @@ public class AndroidPrinterManager {
             throw new IllegalArgumentException("payload is empty");
         }
         PrinterSession activeSession = requireSession();
-        activeSession.print(language, payload.repeat(Math.max(copies, 1)).getBytes(StandardCharsets.UTF_8));
+        activeSession.print(
+            language,
+            payload.repeat(Math.max(copies, 1)).getBytes(resolvePayloadCharset(language))
+        );
+    }
+
+    private static java.nio.charset.Charset resolvePayloadCharset(String language) {
+        if ("cpcl".equalsIgnoreCase(language) || "raw".equalsIgnoreCase(language)) {
+            return StandardCharsets.ISO_8859_1;
+        }
+        return StandardCharsets.UTF_8;
     }
 
     public JSObject getConnectionState() {
