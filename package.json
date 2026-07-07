@@ -1,6 +1,6 @@
 {
   "name": "@m430/capacitor-label-printer",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Capacitor plugin for Qirui/AiYin/BEEPRT label printers",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",
