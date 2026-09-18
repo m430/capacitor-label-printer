@@ -1,57 +1,15 @@
 import Foundation
 
 struct IOSStatusMapper {
-    func toPluginStatus(connected: Bool, statusCode: Int?, message: String, raw: String?) -> [String: Any] {
-        var status: [String: Any] = [
-            "connected": connected,
-            "ready": connected,
-            "paperOut": false,
-            "coverOpen": false,
-            "overheating": false,
-            "message": message
-        ]
-
-        if let raw {
-            status["raw"] = raw
-        } else if let statusCode {
-            status["raw"] = statusCode
+    func toPluginStatus(connected: Bool, message: String, raw: Data?) -> [String: Any] {
+        var status: [String: Any] = ["connected": connected, "message": message]
+        if !connected { status["ready"] = false }
+        if let raw, !raw.isEmpty {
+            status["raw"] = [
+                "data": String(data: raw, encoding: .utf8).map { $0 as Any } ?? Array(raw),
+                "correlated": false
+            ]
         }
-
-        guard connected, let statusCode else {
-            return status
-        }
-
-        switch statusCode {
-        case 0:
-            status["ready"] = false
-            status["coverOpen"] = true
-        case 1:
-            status["ready"] = false
-            status["paperOut"] = true
-        case 2:
-            status["ready"] = false
-            status["overheating"] = true
-        default:
-            break
-        }
-
         return status
-    }
-
-    func message(for statusCode: Int) -> String {
-        switch statusCode {
-        case 0:
-            return "cover open"
-        case 1:
-            return "paper out"
-        case 2:
-            return "overheating"
-        case 3:
-            return "printing"
-        case 4:
-            return "battery low"
-        default:
-            return "ready"
-        }
     }
 }

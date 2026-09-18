@@ -4,7 +4,21 @@ import CoreBluetooth
 import UIKit
 
 @objc(LabelPrinterPlugin)
-public class LabelPrinterPlugin: CAPPlugin {
+public class LabelPrinterPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "LabelPrinterPlugin"
+    public let jsName = "LabelPrinter"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "isSupported", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "checkPermissions", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "ensurePermissions", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "discoverDevices", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "connect", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "disconnect", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getConnectionState", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "print", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getStatus", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openAppSettings", returnType: CAPPluginReturnPromise)
+    ]
     private let manager = IOSPrinterManager()
 
     @objc func isSupported(_ call: CAPPluginCall) {
@@ -16,26 +30,22 @@ public class LabelPrinterPlugin: CAPPlugin {
     }
 
     @objc func ensurePermissions(_ call: CAPPluginCall) {
-        let authorization = bluetoothAuthorization
-        if authorization == .notDetermined {
-            call.resolve([
-                "granted": true,
-                "canPrompt": true,
-                "shouldOpenSettings": false,
-                "permissions": [
-                    "bluetooth": "prompt"
-                ]
-            ])
-            return
+        manager.ensurePermissions { authorization in
+            call.resolve(self.buildPermissionResult(for: authorization))
         }
-
-        call.resolve(buildPermissionResult(for: authorization))
     }
 
     @objc func discoverDevices(_ call: CAPPluginCall) {
         let prefixes = call.getArray("namePrefixes", String.self) ?? []
         let timeoutMs = call.getDouble("timeout") ?? 2000
-        call.resolve(["devices": manager.discoverDevices(namePrefixes: prefixes, timeoutMs: timeoutMs)])
+        manager.discoverDevices(namePrefixes: prefixes, timeoutMs: timeoutMs) { result in
+            switch result {
+            case .success(let devices):
+                call.resolve(["devices": devices])
+            case .failure(let error):
+                call.reject(error.localizedDescription)
+            }
+        }
     }
 
     @objc func connect(_ call: CAPPluginCall) {
@@ -44,17 +54,23 @@ public class LabelPrinterPlugin: CAPPlugin {
             return
         }
 
-        do {
-            try manager.connect(deviceId: deviceId)
+        manager.connect(deviceId: deviceId) { error in
+            if let error {
+                call.reject(error.localizedDescription)
+                return
+            }
             call.resolve()
-        } catch {
-            call.reject(error.localizedDescription)
         }
     }
 
     @objc func disconnect(_ call: CAPPluginCall) {
-        manager.disconnect()
-        call.resolve()
+        manager.disconnect { error in
+            if let error {
+                call.reject(error.localizedDescription)
+                return
+            }
+            call.resolve()
+        }
     }
 
     @objc func getConnectionState(_ call: CAPPluginCall) {
@@ -62,16 +78,23 @@ public class LabelPrinterPlugin: CAPPlugin {
     }
 
     @objc func print(_ call: CAPPluginCall) {
-        do {
-            try manager.print(payload: call.getString("payload", ""), language: call.getString("language", "tspl"), copies: call.getInt("copies", 1))
+        manager.print(
+            payload: call.getString("payload", ""),
+            language: call.getString("language", "tspl"),
+            copies: call.getInt("copies", 1)
+        ) { error in
+            if let error {
+                call.reject(error.localizedDescription)
+                return
+            }
             call.resolve()
-        } catch {
-            call.reject(error.localizedDescription)
         }
     }
 
     @objc func getStatus(_ call: CAPPluginCall) {
-        call.resolve(manager.getStatus())
+        manager.getStatus { status in
+            call.resolve(status)
+        }
     }
 
     @objc func openAppSettings(_ call: CAPPluginCall) {
@@ -93,11 +116,7 @@ public class LabelPrinterPlugin: CAPPlugin {
     }
 
     private var bluetoothAuthorization: CBManagerAuthorization {
-        if #available(iOS 13.0, *) {
-            return CBManager.authorization
-        }
-
-        return .allowedAlways
+        manager.getAuthorization()
     }
 
     private func buildPermissionResult(for authorization: CBManagerAuthorization) -> [String: Any] {

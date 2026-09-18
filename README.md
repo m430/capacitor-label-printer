@@ -9,7 +9,7 @@
 - 已完成独立仓库、npm 包、Capacitor 插件骨架和 `example-app`
 - 已完成 Android `jar` 与 iOS `framework` 的随包分发
 - 已完成统一 JS API、`CPCL` / `TSPL` builder、Android/iOS 编译链路验证
-- 当前 `AndroidPrinterManager` 与 `IOSPrinterManager` 仍是首版骨架，真实厂商 SDK 的会话管理、写入和状态回传逻辑需要继续结合真机联调补齐
+- Android 端基于厂商经典蓝牙 `jar`；iOS 使用 `CoreBluetooth` 异步传输，已补充桥接注册、权限、字节保真与写入确认的自动化回归，打印机兼容性仍需真机验收
 
 ## 安装
 
@@ -148,6 +148,12 @@ async function printDemoLabel() {
 - 当前包内已带上 `ios/VendorFrameworks/` 下的厂商 `framework`
 - `CocoaPods` 集成使用的是 `M430CapacitorLabelPrinter.podspec`
 - 已验证 `npx cap sync ios` 与 `xcodebuild` 编译链路可通过
+- iOS 直接使用 `CoreBluetooth` 异步回调，不再依赖厂商 `WroteReporter` 判断送达；按协商长度分块，逐块等待 BLE 写入确认后才 resolve，不等待物理出纸
+- `CPCL` / `raw` 保留原始编码字节，不改写或追加换行；只支持无响应写入的 BLE 设备会明确拒绝连接
+- `getStatus()` 仅在当前会话明确打印过 `TSPL` 后主动查询；未知语言和 `CPCL` / `raw` 不查询。无有效状态依据时省略 `ready` 等字段，原始响应通过 `raw` 返回
+- 状态查询超时后禁用本次连接的后续查询，重连恢复，避免迟到响应污染下一次查询；详细超时与调用约束见 [API.md](./API.md)
+- `connect()` 前必须先调用 `discoverDevices()`（BLE 需要持有外设实例）
+- `discoverDevices()` 只返回广播了名称的 BLE 设备（与厂商 demo 一致）；未广播名称的设备不会出现在结果中
 - iOS 仍需要宿主在 `Info.plist` 中声明蓝牙用途说明
 
 ### Web
@@ -160,6 +166,7 @@ async function printDemoLabel() {
 
 ```bash
 npm run verify
+python3 scripts/test-ios.py --mutations
 npm run verify:ios
 npm run verify:release
 ```
@@ -167,6 +174,7 @@ npm run verify:release
 其中：
 
 - `verify` 会执行单测、Android Gradle 构建和插件打包
+- `python3 scripts/test-ios.py --mutations` 在 macOS 上用 BLE 测试替身运行真实 Swift 管理器和插件的回归，并验证测试能检出重新引入的错误；它不能替代真机 BLE 验收
 - `verify:ios` 会执行 `example-app` 的 `cap sync ios` 与 `xcodebuild`
 - `verify:release` 会串起完整发布前检查，并执行 `npm pack --dry-run`
 
@@ -181,7 +189,8 @@ npm run verify:release
 ## 已知限制
 
 - 当前版本以“统一 API + 原生依赖分发 + 构建链路打通”为主
-- Android 与 iOS 的真实打印链路还需要按厂商 SDK 文档继续接入
+- Android 已基于厂商经典蓝牙 `jar` 接入；iOS 使用 `CoreBluetooth`，服务选择兼容厂商示例的特征规则，但具体设备的写入确认支持、状态响应格式及纸张打印效果仍需真机验收
+- iOS 的 BLE 写入确认不代表打印机已解析指令；通知没有请求编号，`raw.correlated` 固定为 false，目前不把这些未关联的数据映射成缺纸、开盖等布尔值
 - 还没有内置打印队列、自动重连、模板编辑器和图片调试工具
 
 ## 仓库
