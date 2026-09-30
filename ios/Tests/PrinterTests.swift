@@ -40,11 +40,9 @@ final class Fixture {
             central.connected(peripheral)
             expect(connectionResults.isEmpty, "connection does not resolve before characteristics")
             peripheral.discoverServicesAndCharacteristics()
-            if properties.contains(.write) {
-                expect(connectionResults.isEmpty, "connection waits for notification subscription")
-                peripheral.notifyReady(reader)
-                expect(connectionResults == [true], "ready connection resolves once")
-            }
+            expect(connectionResults.isEmpty, "connection waits for notification subscription")
+            peripheral.notifyReady(reader)
+            expect(connectionResults == [true], "ready connection resolves once")
         }
     }
 
@@ -70,7 +68,9 @@ struct PrinterTests {
             ("bridge", bridge), ("permission", permission), ("scan-readiness", scanReadiness),
             ("powered-off", poweredOff), ("raw-bytes", rawBytes), ("cpcl-bytes", cpclBytes),
             ("tspl-lines", tsplLines), ("write-error", writeError), ("write-timeout", writeTimeout),
-            ("no-response-only", noResponseOnly), ("unknown-language", unknownLanguage),
+            ("no-response-only", noResponseOnly), ("without-response-flow", withoutResponseFlowControl),
+            ("drain-before-complete", drainBeforeComplete),
+            ("dual-mode-preference", preferredWithoutResponse), ("unknown-language", unknownLanguage),
             ("status-fragments", statusFragments), ("status-timeout", statusTimeout),
             ("connect-timeout", connectTimeout), ("disconnect", disconnect),
             ("disconnect-retry-timeout", disconnectRetryTimeout), ("power-cycle", powerCycle),
@@ -208,7 +208,75 @@ struct PrinterTests {
 
     static func noResponseOnly() {
         let f = Fixture(properties: .writeWithoutResponse)
-        expect(f.connectionResults == [false], "writeWithoutResponse-only printers are rejected explicitly")
+        expect(f.connectionResults == [true], "writeWithoutResponse-only printers connect")
+        let bytes = Data(Array(UInt8.min...UInt8.max) + [13, 10, 0, 255])
+        let payload = String(data: bytes, encoding: .isoLatin1)!
+        var results: [Bool] = []
+        f.manager.print(payload: payload, language: "cpcl", copies: 1) { results.append($0 == nil) }
+        expect(results == [true], "unacknowledged print resolves without waiting for acknowledgements")
+        let actual = f.peripheral.writes.reduce(into: Data()) { $0.append($1.0) }
+        expect(actual == bytes, "withoutResponse preserves all bytes")
+        expect(f.peripheral.writes.allSatisfy { $0.0.count <= 23 && $0.2 == .withoutResponse },
+               "chunks honour the negotiated write length in unacknowledged mode")
+        f.close()
+    }
+
+    static func preferredWithoutResponse() {
+        let f = Fixture(properties: [.write, .writeWithoutResponse])
+        expect(f.connectionResults == [true], "dual-mode printers connect")
+        let bytes = Data(repeating: 0x5A, count: 60)
+        let payload = String(data: bytes, encoding: .isoLatin1)!
+        var results: [Bool] = []
+        f.manager.print(payload: payload, language: "raw", copies: 1) { results.append($0 == nil) }
+        expect(results == [true], "dual-mode print resolves through the unacknowledged path")
+        expect(f.peripheral.writes.allSatisfy { $0.2 == .withoutResponse },
+               "dual-mode characteristic prefers unacknowledged writes")
+        let actual = f.peripheral.writes.reduce(into: Data()) { $0.append($1.0) }
+        expect(actual == bytes, "dual-mode payload is preserved")
+        f.close()
+    }
+
+    static func withoutResponseFlowControl() {
+        let f = Fixture(properties: .writeWithoutResponse)
+        let bytes = Data((0..<120).map { UInt8($0 % 251) })
+        let payload = String(data: bytes, encoding: .isoLatin1)!
+        var results: [Bool] = []
+        var remaining = 2
+        f.peripheral.onWrite = { _ in
+            remaining -= 1
+            if remaining <= 0 { f.peripheral.canSendWriteWithoutResponse = false }
+        }
+        f.manager.print(payload: payload, language: "raw", copies: 1) { results.append($0 == nil) }
+        expect(results.isEmpty && f.peripheral.writes.count == 2,
+               "print pauses exactly when the transmit buffer reports full")
+        f.peripheral.canSendWriteWithoutResponse = true
+        f.peripheral.onWrite = nil
+        f.peripheral.sendReady()
+        expect(results == [true], "peripheralIsReady resumes the queued payload")
+        let actual = f.peripheral.writes.reduce(into: Data()) { $0.append($1.0) }
+        expect(actual == bytes, "flow-controlled transfer keeps every byte")
+        f.close()
+    }
+
+    static func drainBeforeComplete() {
+        let f = Fixture(properties: .writeWithoutResponse)
+        let bytes = Data((0..<50).map { UInt8($0 % 251) })
+        let payload = String(data: bytes, encoding: .isoLatin1)!
+        var results: [Bool] = []
+        var written = 0
+        f.peripheral.onWrite = { chunk in
+            written += chunk.count
+            // The final chunk saturates the buffer: all bytes are submitted but still draining
+            if written == bytes.count { f.peripheral.canSendWriteWithoutResponse = false }
+        }
+        f.manager.print(payload: payload, language: "raw", copies: 1) { results.append($0 == nil) }
+        expect(results.isEmpty && f.peripheral.writes.count == 3,
+               "print stays pending while the submitted payload is still draining")
+        f.peripheral.canSendWriteWithoutResponse = true
+        f.peripheral.sendReady()
+        expect(results == [true], "peripheralIsReady completes the drained print")
+        let actual = f.peripheral.writes.reduce(into: Data()) { $0.append($1.0) }
+        expect(actual == bytes, "drained transfer keeps every byte")
         f.close()
     }
 

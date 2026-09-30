@@ -98,6 +98,7 @@ public protocol CBPeripheralDelegate: AnyObject {
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?)
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?)
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?)
+    func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral)
 }
 
 public final class CBPeripheral: NSObject {
@@ -107,6 +108,7 @@ public final class CBPeripheral: NSObject {
     public weak var delegate: CBPeripheralDelegate?
     public var services: [CBService]?
     public var writeLimit = 23
+    public var canSendWriteWithoutResponse = true
     public var writes: [(Data, CBCharacteristic, CBCharacteristicWriteType)] = []
     public var notificationRequests: [CBCharacteristic] = []
     public var onWrite: ((Data) -> Void)?
@@ -130,6 +132,9 @@ public final class CBPeripheral: NSObject {
     }
     public func acknowledge(_ characteristic: CBCharacteristic, error: Error? = nil) {
         delegate?.peripheral(self, didWriteValueFor: characteristic, error: error)
+    }
+    public func sendReady() {
+        delegate?.peripheralIsReady(toSendWriteWithoutResponse: self)
     }
     public func receive(_ data: Data, on characteristic: CBCharacteristic, error: Error? = nil) {
         characteristic.value = data

@@ -7,7 +7,9 @@ final class IOSPrinterManager: NSObject {
         let completion: (Error?) -> Void
         var offset = 0
         var chunkLength = 0
+        var chunkCount = 0
         var timer: DispatchWorkItem?
+        let startedAt = Date()
 
         init(data: Data, completion: @escaping (Error?) -> Void) {
             self.data = data
@@ -41,6 +43,7 @@ final class IOSPrinterManager: NSObject {
     private var devices: [String: [String: Any]] = [:]
     private var currentPeripheral: CBPeripheral?
     private var writeCharacteristic: CBCharacteristic?
+    private var writeType: CBCharacteristicWriteType = .withResponse
     private var notifyCharacteristic: CBCharacteristic?
     private var pendingServices = Set<CBUUID>()
     private var connected = false
@@ -211,8 +214,15 @@ final class IOSPrinterManager: NSObject {
                 completion(self.error("unable to encode print payload"))
                 return
             }
-            var repeated = Data()
-            for _ in 0..<copies { repeated.append(data) }
+            let repeated: Data
+            if copies == 1 {
+                repeated = data
+            } else {
+                var combined = Data()
+                combined.reserveCapacity(data.count * copies)
+                for _ in 0..<copies { combined.append(data) }
+                repeated = combined
+            }
             self.activeLanguage = language
             self.startWrite(repeated, completion: completion)
         }
@@ -341,6 +351,8 @@ final class IOSPrinterManager: NSObject {
 
     private func startWrite(_ data: Data, completion: @escaping (Error?) -> Void) {
         writeJob = WriteJob(data: data, completion: completion)
+        let limit = currentPeripheral?.maximumWriteValueLength(for: writeType) ?? 0
+        NSLog("[LabelPrinter] print begin bytes=\(data.count) limit=\(limit) type=\(writeType == .withResponse ? "ack" : "noAck")")
         writeNextChunk()
     }
 
@@ -358,6 +370,16 @@ final class IOSPrinterManager: NSObject {
             finishWrite(nil)
             return
         }
+        if writeType == .withResponse {
+            writeWithResponseChunk(job: job, peripheral: peripheral, characteristic: characteristic)
+        } else {
+            pumpWithoutResponse(job: job, peripheral: peripheral, characteristic: characteristic)
+        }
+    }
+
+    private func writeWithResponseChunk(
+        job: WriteJob, peripheral: CBPeripheral, characteristic: CBCharacteristic
+    ) {
         let limit = peripheral.maximumWriteValueLength(for: .withResponse)
         guard limit > 0 else {
             cancelSession(error("invalid BLE write length"))
@@ -365,6 +387,7 @@ final class IOSPrinterManager: NSObject {
         }
         job.chunkLength = min(limit, job.data.count - job.offset)
         let chunk = job.data.subdata(in: job.offset..<(job.offset + job.chunkLength))
+        job.chunkCount += 1
         job.timer = after(operationTimeout) {
             guard self.writeJob === job else { return }
             self.cancelSession(self.error("printer write acknowledgement timeout; delivery is uncertain"))
@@ -372,10 +395,50 @@ final class IOSPrinterManager: NSObject {
         peripheral.writeValue(chunk, for: characteristic, type: .withResponse)
     }
 
+    /// Streams chunks with unacknowledged writes and pauses only when the transmit buffer
+    /// reports full; peripheralIsReady resumes the job. Each write is guarded by
+    /// canSendWriteWithoutResponse because writing into a full buffer discards data.
+    /// Completion additionally waits until the buffer is no longer saturated, so success
+    /// means the link actually drained every submitted byte.
+    private func pumpWithoutResponse(
+        job: WriteJob, peripheral: CBPeripheral, characteristic: CBCharacteristic
+    ) {
+        let limit = peripheral.maximumWriteValueLength(for: .withoutResponse)
+        guard limit > 0 else {
+            cancelSession(error("invalid BLE write length"))
+            return
+        }
+        while job.offset < job.data.count, peripheral.canSendWriteWithoutResponse {
+            job.chunkLength = min(limit, job.data.count - job.offset)
+            let chunk = job.data.subdata(in: job.offset..<(job.offset + job.chunkLength))
+            job.offset += job.chunkLength
+            job.chunkCount += 1
+            peripheral.writeValue(chunk, for: characteristic, type: .withoutResponse)
+        }
+        if job.offset == job.data.count, peripheral.canSendWriteWithoutResponse {
+            // Every byte reached CoreBluetooth and the transmit buffer is not saturated.
+            finishWrite(nil)
+            return
+        }
+        // Either unsubmitted bytes remain (buffer full) or the final bytes are still
+        // draining through a saturated buffer. Wait for peripheralIsReady; guard the wait
+        // so a silent stack cannot hang the print promise forever.
+        job.timer?.cancel()
+        job.timer = after(operationTimeout) {
+            guard self.writeJob === job else { return }
+            self.cancelSession(self.error("printer write stalled; delivery is uncertain"))
+        }
+    }
+
     private func finishWrite(_ error: Error?) {
         let job = writeJob
         writeJob = nil
         job?.timer?.cancel()
+        if let job {
+            let elapsed = Int(Date().timeIntervalSince(job.startedAt) * 1000)
+            let status = error == nil ? "done" : "failed"
+            NSLog("[LabelPrinter] print \(status) chunks=\(job.chunkCount) elapsed=\(elapsed)ms")
+        }
         deliver { job?.completion(error) }
     }
 
@@ -428,6 +491,7 @@ final class IOSPrinterManager: NSObject {
         currentPeripheral?.delegate = nil
         currentPeripheral = nil
         writeCharacteristic = nil
+        writeType = .withResponse
         notifyCharacteristic = nil
         pendingServices.removeAll()
         connected = false
@@ -518,7 +582,8 @@ extension IOSPrinterManager: CBPeripheralDelegate {
         let pairs: [(CBCharacteristic, CBCharacteristic)] = candidates.compactMap { candidate in
             let characteristics = candidate.characteristics ?? []
             let writers = characteristics.filter {
-                $0.properties.contains(.write) && (preferred == nil || $0.uuid == vendorWrite)
+                ($0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse)) &&
+                    (preferred == nil || $0.uuid == vendorWrite)
             }
             let readers = characteristics.filter {
                 ($0.properties.contains(.notify) || $0.properties.contains(.indicate)) &&
@@ -528,10 +593,11 @@ extension IOSPrinterManager: CBPeripheralDelegate {
             return (writers[0], readers[0])
         }
         guard pairs.count == 1, let pair = pairs.first else {
-            cancelSession(self.error("printer requires an unambiguous BLE service with acknowledged writes and notifications"))
+            cancelSession(self.error("printer requires an unambiguous BLE service with a write characteristic and notifications"))
             return
         }
         writeCharacteristic = pair.0
+        writeType = pair.0.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
         notifyCharacteristic = pair.1
         peripheral.setNotifyValue(true, for: pair.1)
     }
@@ -556,6 +622,18 @@ extension IOSPrinterManager: CBPeripheralDelegate {
         if let error { cancelSession(error); return }
         job.offset += job.chunkLength
         writeNextChunk()
+    }
+
+    func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        onMain {
+            guard peripheral === self.currentPeripheral, !self.disconnecting,
+                  self.writeJob != nil, self.writeType == .withoutResponse else { return }
+            guard peripheral.state == .connected else {
+                self.cancelSession(self.error("printer connection lost during write"))
+                return
+            }
+            self.writeNextChunk()
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {

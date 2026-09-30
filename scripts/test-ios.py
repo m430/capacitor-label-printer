@@ -39,6 +39,9 @@ with tempfile.TemporaryDirectory(prefix="label-printer-ios-") as directory:
             ("status-timeout", "IOSPrinterManager.swift", "if invalidate { queryAllowed = false }", "if invalidate { queryAllowed = true }"),
             ("connect-timeout", "IOSPrinterManager.swift", "central?.cancelPeripheralConnection(peripheral)", "_ = peripheral"),
             ("unnamed-hidden", "IOSPrinterManager.swift", "guard !name.isEmpty else { return }\n        ", ""),
+            ("drain-before-complete", "IOSPrinterManager.swift",
+             "if job.offset == job.data.count, peripheral.canSendWriteWithoutResponse {",
+             "if job.offset == job.data.count {"),
         ]
         for case, filename, old, new in mutations:
             source = (PLUGIN / filename).read_text()
